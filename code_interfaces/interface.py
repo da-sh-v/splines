@@ -123,7 +123,7 @@ class MainWindow(QMainWindow):
 		self.label_output.setText("График pt-сплайн был выбран и нажата кнопка Выполнить.")
 
 	def handle_sm_spline(self):
-		PTSpline.demo()
+		SmoothingCubicSpline.demo()
 		self.label_output.setText("График сгл_куб-сплайн был выбран и нажата кнопка Выполнить.")
 
 	def handle_pt_spline(self):

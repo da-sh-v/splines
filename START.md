@@ -20,7 +20,7 @@
 
    - Путь: `/splines/main.py`
 
-2. **splines.py**: Реализация базового класса Spline и его наследников (B-spline и P-spline).
+2. **splines.py**: Реализация базового класса Spline и его наследников(PTSpline, p_spline, b_spline, SmoothingCubicSpline, CardinalZSpline).
 
    - Путь: `/splines/code_interfaces/splines.py`
 
@@ -35,7 +35,7 @@
    - `main.ui`: Главный интерфейс с настройками и выбором сплайнов.
    - `b_variable.ui`, `p_variable.ui`: Настройки для различных типов сплайнов.
 
-5. **README.md**: Лицевая страница проекта, краткое описание, цели и контакты руководителя/учатсников .
+5. **README.md**: Лицевая страница проекта, краткое описание, цели и контакты руководителя/участников .
 
    - Путь: `/splines/README.md`
 
@@ -55,6 +55,11 @@ python main.py
 
 Выберите нужный тип сплайна, настройте параметры и нажмите "Построить" для отображения результата.
 
+![main window](theory/demo_splines/main_window.jpeg)
+
+Пример настраиваемого варианта P-сплайна
+
+![p variable](theory/demo_splines/p_variable.jpeg)
 #### 2. Использование без GUI:
 
 Описание функции для построения P-сплайна(с указанными по умолчанию параметрами):
@@ -111,3 +116,83 @@ p_spline.plot_p_spline(
     noise_variance=0.1
 )
 ```
+
+Описание функции для построения z-кардинального сплайна(с указанными по умолчанию параметрами):
+
+```python
+def plot(m, func=None,
+          num_points=1000, figsize=(10, 6),
+          title=None, show_original=True,
+          grid=True, legend=True):
+     """
+     Визуализация кардинального Z-сплайна порядка m.
+
+     Параметры:
+     - m: порядок сплайна (int)
+     - func: функция f(x), которую интерполирует Z-сплайн (если None — импульс)
+     - num_points: точек для построения
+     - figsize: размер графика
+     - title: заголовок
+     - show_original: рисовать ли исходную функцию
+     - grid, legend: отображать ли сетку и легенду
+     """
+```
+
+Описание функции для построения pt-сплайна(с указанными по умолчанию параметрами):
+
+```python
+def plot(x, y, degree=3, smoothing_param=1.0, knots=None,
+          show_data=True, color='blue', title=None,
+          num_points=300, figsize=(10, 6), grid=True, legend=True):
+     """
+     Визуализация Penalized Truncated Spline по заданным параметрам.
+
+     Параметры:
+     - x, y: данные
+     - degree: степень полинома
+     - smoothing_param: параметр сглаживания λ
+     - knots: массив внутренних узлов или None
+     - show_data: отображать ли точки
+     - color: цвет линии сплайна
+     - title: заголовок графика
+     - num_points: число точек на графике
+     - figsize: размер фигуры
+     - grid, legend: отображение сетки и легенды
+     """
+```
+
+Описание функции для построения сглаживающего кубического сплайна(с указанными по умолчанию параметрами):
+
+```python
+def plot(x, y, lam=0.5,
+          show_data=True, color='blue', title=None,
+          num_points=300, figsize=(10, 6), grid=True, legend=True):
+     """
+     Визуализация CubicClosedSpline по заданным параметрам.
+
+     Параметры:
+     - x, y: входные данные
+     - lam: параметр сглаживания λ
+     - show_data: показывать ли точки
+     - color: цвет линии сплайна
+     - title: заголовок
+     - num_points: число точек на графике
+     - figsize: размер фигуры
+     - grid, legend: отображение сетки и легенды
+     """
+```
+
+Для демонстрации реализованы статические методы сплайн.demo()
+
+1. **P-сплайн**:
+![p spline](theory/demo_splines/p_spline.jpeg)
+P-сплайн с циклическими граничными условиями
+![p cyclic](theory/demo_splines/p_cyclic.jpeg)
+2. **PT-сплайн**:
+![pt spline](theory/demo_splines/pt_spline.jpeg)
+3. **Сглаживающий кубический сплайн**:
+![smooth](theory/demo_splines/smooth.jpeg)
+4. **Сглаживающий кубический сплайн с закрепленными концами**:
+![smooth clamped](theory/demo_splines/smooth_clamped.png)
+5. **Z-кардинальный сплайн**:
+![z cardinal](theory/demo_splines/z_cardinal.jpeg)
