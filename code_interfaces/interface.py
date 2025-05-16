@@ -1,7 +1,7 @@
 from PyQt6 import uic
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QListWidgetItem
-from code_interfaces.splines import p_spline, b_spline
+from code_interfaces.splines import p_spline, b_spline, PTSpline, SmoothingCubicSpline, CubicClosedSpline, CardinalZSpline
 import sys
 from numpy import sin, cos, exp
 
@@ -21,8 +21,9 @@ class MainWindow(QMainWindow):
 		# Список радиокнопок для типов сплайнов
 		self.spline_buttons = [
 			self.p_radioButton,
+			self.pt_radioButton,
 			self.z_radioButton,
-			self.b_radioButton
+			self.sm_radioButton
 		]
 
 		# Подключаем каждую радиокнопку к общему обработчику связи вида сплайна и действия
@@ -44,11 +45,13 @@ class MainWindow(QMainWindow):
 		# Добавляем элементы в зависимости от выбранного сплайна
 		items = []
 		if self.p_radioButton.isChecked():
-			items = ["Опции для p-сплайна"]#, "Опция 2 для p-сплайна", "Опция 3 для p-сплайна"]
+			items = ["Опции для p-сплайна"]
 		elif self.z_radioButton.isChecked():
-			items = ["Опции для z-сплайна"]#, "Опция 2 для z-сплайна"]
-		elif self.b_radioButton.isChecked():
-			items = ["Опции для b-сплайна"]#, "Опция 2 для b-сплайна", "Опция 3 для b-сплайна", "Опция 4 для b-сплайна"]
+			items = ["Опции для z-сплайна"]
+		elif self.pt_radioButton.isChecked():
+			items = ["Опции для pt-сплайна"]
+		elif self.sm_radioButton.isChecked():
+			items = ["Опции для сгл_куб-сплайна"]
 
 		# Добавляем элементы в QListWidget с флажками
 		for item_text in items:
@@ -74,17 +77,25 @@ class MainWindow(QMainWindow):
 			else:
 				self.label_output.setText("Выберите пример.")
 
-		elif self.b_radioButton.isChecked():
+		elif self.pt_radioButton.isChecked():
 			if self.ExampleButton.isChecked():
-				self.handle_b_spline()
+				self.handle_pt_spline() 				# доделать
+			else:
+				self.label_output.setText("Выберите пример.")
+
+		elif self.sm_radioButton.isChecked():
+			if self.ExampleButton.isChecked():
+				self.handle_sm_spline()				# доделать
 			elif self.VariableButton.isChecked():
-				self.run_b_spline_slider_window()
+				self.handle_ccs_spline()
 			else:
 				self.label_output.setText("Выберите пример.")
 
 		elif self.z_radioButton.isChecked():
-			self.handle_z_spline()
-			self.development()
+			if self.ExampleButton.isChecked():
+				self.handle_z_spline()				# доделать
+			else:
+				self.label_output.setText("Выберите пример.")
 
 
 
@@ -103,13 +114,26 @@ class MainWindow(QMainWindow):
 		p_spline.plot_p_spline()
 		self.label_output.setText("График p-сплайн был выбран и нажата кнопка Выполнить.")
 
-
 	def handle_z_spline(self):
-		pass
+		CardinalZSpline.demo()
+		self.label_output.setText("График z-сплайн был выбран и нажата кнопка Выполнить.")
 
-	def handle_b_spline(self):
-		b_spline.plot_b_spline(2,10)
-		self.label_output.setText("График b-сплайн был выбран и нажата кнопка Выполнить.")
+	def handle_pt_spline(self):
+		PTSpline.demo()
+		self.label_output.setText("График pt-сплайн был выбран и нажата кнопка Выполнить.")
+
+	def handle_sm_spline(self):
+		PTSpline.demo()
+		self.label_output.setText("График сгл_куб-сплайн был выбран и нажата кнопка Выполнить.")
+
+	def handle_pt_spline(self):
+		PTSpline.demo()
+		self.label_output.setText("График сгл_куб-сплайн с закрепленными концами был выбран и нажата кнопка Выполнить.")
+
+	def handle_ccs_spline(self):
+		CubicClosedSpline.demo()
+		self.label_output.setText("График pt-сплайн был выбран и нажата кнопка Выполнить.")
+
 
 	#слайдер пока реализован только для p-сплайна и b-сплайна
 	def run_p_spline_slider_window(self):

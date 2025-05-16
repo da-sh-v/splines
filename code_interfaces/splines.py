@@ -1564,16 +1564,16 @@ class p_spline(spline):
 			noise = np.random.normal(loc=0.0, scale=noise_stddev, size=len(y_data))  # Размер совпадает с y_data
 			y_data += noise
 
-        # Создание объекта p_spline
-        spline_p = spline.create_p_spline(
-            x=x_data,
-            y=y_data,
-            degree=3,
-            penalty_order=2,
-            lambda_=1.0
-        )
-        # Выполняем подгонку с функцией штрафа
-        spline_p.fit(penalty_fun=penalty_fun)
+		# Создание объекта p_spline
+		spline_p = spline.create_p_spline(
+			x=x_data,
+			y=y_data,
+			degree=3,
+			penalty_order=2,
+			lambda_=1.0
+		)
+		# Выполняем подгонку с функцией штрафа
+		spline_p.fit(penalty_fun=penalty_fun)
 
 		# Построение графика с учетом граничных условий
 		print(f"Сплайн с граничными условиями {boundary_conditions}:")
@@ -1678,10 +1678,5 @@ class b_spline(spline):
 
 # Для отладки
 if __name__ == "__main__":
-    #p_spline.plot_p_spline()
-    pass
-
-
-
-
-
+	#p_spline.plot_p_spline()
+	pass
