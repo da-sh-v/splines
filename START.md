@@ -196,3 +196,36 @@ P-сплайн с циклическими граничными условиям
 ![smooth clamped](theory/demo_splines/smooth_clamped.png)
 5. **Z-кардинальный сплайн**:
 ![z cardinal](theory/demo_splines/z_cardinal.jpeg)
+
+Чтобы вызвать/реализовать сплайн вручную достаточно создать 
+объект класса необходимого сплайна и передать ему требуемые параметры
+
+### Пример:
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from code_interfaces.splines import PSpline
+np.random.seed(42)
+x = np.linspace(0, 10, 100)
+y_true = 0.5 * x + np.sin(x)
+y = y_true + np.random.normal(scale=0.5, size=x.shape)
+
+pspline = PSpline(degree=3, penalty_order=2, lambda_=1.0)
+pspline.fit(x, y)
+
+x_range = (min(x), max(x))
+x_vals = np.linspace(x_range[0], x_range[1], 200)
+y_vals = pspline.predict(x_vals)
+
+plt.figure(figsize=(10, 6))
+plt.plot(x_vals, y_vals, label=f"{pspline.__class__.__name__} сплайн")
+plt.scatter(x, y, color='red', s=20, alpha=0.7, label="Данные")
+plt.xlabel("x")
+plt.ylabel("y")
+plt.title(f"Построение {pspline.__class__.__name__} сплайна")
+plt.legend()
+plt.grid(True)
+plt.show()
+```
+
+Чтобы добавить свой сплайн, нужно написать класс сплайна, как наследника абстрактного класса, в splines.py.
