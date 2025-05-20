@@ -2,9 +2,7 @@ import numpy as np
 
 
 # Универсальная функция генерации точек
-def generate_noisy_data(func, noise_param=0.0,
-						x_range=(0, 10), n_points=50,
-						return_true_curve=True, dense_resolution=500):
+def generate_noisy_data(func, noise_param=0.0, x_range=(0, 10), n_points=50, return_true_curve=True, dense_resolution=500):
 	"""
 	Генерация зашумлённых данных и (опционально) истинной кривой.
 
