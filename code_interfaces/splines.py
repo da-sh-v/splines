@@ -1675,6 +1675,342 @@ class b_spline(spline):
 		spline = b_spline(degree, control_points)
 		spline.plot()
 
+# ===== MARS =====
+
+class mars_spline(Spline):
+
+	class basis_function:
+		def __init__(self, func):
+			self.func = func
+			#self.symbolic = None
+
+		def __call__(self, *args):
+			return self.func(*args)
+
+		"""Handles f * g"""
+		def __mul__(self, other):
+			if isinstance(other, mars_spline.basis_function):
+				return mars_spline.basis_function(lambda *args: self(*args) * other(*args))
+			elif isinstance(other, (int, float)):
+				return mars_spline.basis_function(lambda *args: other * self(*args))
+			else:
+				return NotImplemented
+
+		"""Handles 2 * f"""
+		def __rmul__(self, other):
+			return self.__mul__(other)
+
+		def __add__(self, other):
+			if isinstance(other, mars_spline.basis_function):
+				return mars_spline.basis_function(lambda *args: self(*args) + other(*args))
+			elif isinstance(other, (int, float)):
+				return mars_spline.basis_function(lambda *args: self(*args) + other)
+			return NotImplemented
+
+		def __radd__(self, other):
+			# This lets `sum()` start with 0
+			if isinstance(other, (int, float)):
+				return mars_spline.basis_function(lambda *args: other + self(*args))
+			return NotImplemented
+			#return self.__add__(other)
+
+
+	"""Multivariate Adaptive Regression Spline"""
+	def __init__(self, M_max, x, y, with_pruning=True, d=3, lof='rss'):
+		"""
+		Инициализация MARS-сплайна
+
+		Args:
+			M_max: Максимальное число базисных функций
+			x: Матрица входных данных
+			y: Вектор зависимых переменных
+			with_pruning: Использовать ли алгоритм backward pass
+			d: Гиперпараметр, цена каждой базисной функции. Используется при расчете GCV.
+			lof: Lack-of-fit. Можно выбрать 'rss' или 'gcv'
+		"""
+		x = np.asarray(x)
+		if x.ndim == 1:
+			n_predictors = 1  # treat 1D array as a single "column"
+		elif x.ndim >= 2:
+			n_predictors = x.shape[1]
+		else:
+			raise ValueError("Input does not have dimensions!")  # scalar or empty case
+		
+		#M_max can't be greater than number of observations 
+		#(in that case we would just get same cuts) 
+		#(but I'm not sure how it works on higher dimensions)
+		M_max |= 1  # sets the least significant bit to 1, making it odd
+		self.M_max = M_max#min(M_max, len(y)) 
+		self.coefficients = None
+		self.basis_functions = np.array([mars_spline.basis_function(lambda x: 1) for _ in range(self.M_max)], dtype=object)
+		self.__predictor_indices = list(range(n_predictors))
+		self.__used_predictors = np.array([set() for _ in range(self.M_max)], dtype=object)
+		self.__with_pruning = with_pruning
+		self.d = d
+		if lof == 'gcv':
+			self.LOF = self.LOF_GCV
+		elif lof == 'rss':
+			self.LOF = self.LOF_RSS
+		else:
+			raise ValueError(f"Invalid lof value: {lof}. Must be 'gcv' or 'rss'.")
+
+	"""
+	M: Current Basis Function index
+	x: Matrix of observations
+
+	returns: B_M, B_M1, v, t, m
+	B_M: Candidate basis function (with sign: +1)
+	B_M1: Candidate basis function (with sign: -1)
+	v: Index of predictor variable used in basis functions B_M and B_M1
+	t: Cut point used in basis functions B_M and B_M1
+	m: Index of parent basis function that got multiplied with candidate basis functions
+	"""
+	def candidate_basis_generator(self, M, x):
+		for m in range(0, M-1): #начинаем с 0, а не с 1, как в статье, т.к. индексы начинаются с 0
+			not_used = [i for i in self.__predictor_indices if i not in self.__used_predictors[m]]
+			for v in not_used:
+				cut_points = np.unique([x[j, v] for j in range(0, len(x)) if self.basis_functions[m](x[j]) > 0])
+				#bf_sum = sum(self.basis_functions[:M-1])
+
+				for t in cut_points:
+					B_M = self.basis_functions[m] * self.hinge(v, t, 1)
+					B_M1 = self.basis_functions[m] * self.hinge(v, t, -1)
+					yield (B_M, B_M1, v, t, m)
+
+		return
+	
+	def forward_pass(self, x, y):
+		M = 2
+		while M <= self.M_max:
+			lof_star = np.inf
+			m_star = None
+			v_star = None
+			t_star = None
+			
+			#search for the next best basis functions
+			#generator returns new candidate pairs B_M and B_M+1
+			for B_M, B_M1, v, t, m in self.candidate_basis_generator(M, x):
+				#add candidate basis functions to the model and copmute lof
+				basis = np.append(self.basis_functions[:M-1], [B_M, B_M1])
+				#compute lack-of-fit of model
+				lof = self.LOF(basis, x, y)
+				if lof < lof_star:
+					lof_star = lof
+					m_star = m
+					v_star = v
+					t_star = t
+			
+			print(f"added B[{M-1}] = [x{v_star} - {t_star}]_+")
+			print(f"added B[{M}] = [-(x{v_star} - {t_star})]_+")
+			self.basis_functions[M-1] = self.basis_functions[m_star] * mars_spline.hinge(v_star, t_star, 1)
+			self.basis_functions[M] = self.basis_functions[m_star] * mars_spline.hinge(v_star, t_star, -1)
+			M += 2
+
+	def backward_pass(self, x, y):
+		M_max = len(self.basis_functions) # number of basis functions
+		J_star = set(range(1, M_max + 1)) # {1,2,...,M_max}
+		K_star = J_star.copy()
+		lof_star = np.inf
+
+		for M in range(M_max, 1, -1): #M_max, M_max-1, M_max-2, ..., 2
+			b = np.inf
+			L = K_star.copy()
+			for m in range(2, M+1):
+				K = L.copy()
+				K.discard(m) #trying to remove m-th Basis Function
+
+				indices = sorted(i - 1 for i in K)
+				remaining_basis = self.basis_functions[indices]
+				lof = self.LOF(remaining_basis, x, y)
+				if lof <= b:
+					b = lof
+					K_star = K
+				if lof <= lof_star:
+					lof_star = lof
+					J_star = K
+				
+		print(f"M_max: {M_max}; J_star: {J_star}; K_star: {K_star}")
+		indices = sorted(i - 1 for i in J_star)
+		self.basis_functions = self.basis_functions[indices]
+
+	@staticmethod
+	def least_squares(basis_funcs, x, y):
+		B = np.array([[f(row) for f in basis_funcs] for row in x], dtype=float)
+		coefficents, _, _, _ = np.linalg.lstsq(B, y, rcond=None)
+		return (B, coefficents)
+
+	def LOF_RSS(self, basis_funcs, x, y):
+		B, coeff = mars_spline.least_squares(basis_funcs, x, y)
+		y_pred = B @ coeff
+		rss = np.sum((y - y_pred) ** 2)
+		return rss
+
+	def LOF_GCV(self, basis_funcs, x, y):
+		#TODO: Generalized Cross Validation
+		## MSE / (1 - Complexity(M)/N)^2
+		B, coeff = mars_spline.least_squares(basis_funcs, x, y)
+		y_pred = B @ coeff
+		mse = np.mean((y - y_pred) ** 2)
+		N = len(y)
+		C = self.complexity(basis_funcs[1:], x, self.d) #only non-constant basis functions
+		return mse / ((1 - C/N) ** 2)
+
+	def complexity(self, basis, x, d = 3):
+		#TODO
+		#B_ij = (B_i(x_j)), x_j - j-th observation of predictor set x (j-th row in matrix x)
+		B = np.array([[f(row) for row in x] for f in basis], dtype=float)
+		BTB_inv = np.linalg.pinv(B.T @ B)
+		projection = B @ BTB_inv @ B.T
+		return np.trace(projection) + 1 + d*len(basis)
+
+	def fit(self, x: np.ndarray, y: np.ndarray) -> None:
+		"""Обучение сплайна на данных"""
+
+		#Add basis functions during forward_pass
+		self.forward_pass(x, y)
+
+		#Prune model during backward pass
+		if self.__with_pruning:
+			self.backward_pass(x, y)
+
+		#Compute coefficients
+		_, self.coefficients = mars_spline.least_squares(self.basis_functions, x, y)
+
+	def predict(self, x: np.ndarray) -> np.ndarray:
+		"""Предсказание значений сплайна в точках x"""
+		if self.coefficients is None:
+			raise ValueError("Spline not fitted yet")
+
+		x = np.asarray(x)
+		if x.ndim == 1:
+			x = x.reshape(-1, 1)
+
+		B = np.array([[f(row) for f in self.basis_functions] for row in x], dtype=float)
+		return B @ self.coefficients
+
+	def get_basis_functions(self) -> List[Callable]:
+		"""Получение базисных функций сплайна"""
+		return self.basis_functions
+
+	@staticmethod
+	def hinge(index, knot, sign):
+		return mars_spline.basis_function(lambda x: max(0, sign * (x[index] - knot)))
+
+	@staticmethod
+	def demo(M_max):
+		np.random.seed(42)
+		x = np.linspace(0, 2 * np.pi, 250)
+		x = x.reshape(-1,1)
+		x_dense = np.linspace(0, 2 * np.pi, 200)
+
+		# Истинные функции
+		y_sin_true = np.sin(5 * x)
+		y_sin_true_dense = np.sin(5 * x_dense)
+		noise = np.random.normal(0, 0.2, len(x)).reshape(-1,1)
+		y_sin_noisy = y_sin_true + noise
+
+		y_poly_true = 0.5 * x ** 2 - x + 1
+		y_poly_true_dense = 0.5 * x_dense ** 2 - x_dense + 1
+		noise = np.random.normal(0, 0.3, len(x)).reshape(-1,1)
+		y_poly_noisy = y_poly_true + noise
+
+		# Параметры
+		colors = ['green']
+
+		fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+
+		# Аппроксимация синуса
+		ax1.scatter(x, y_sin_noisy, alpha=0.6, color='blue', label='Данные с шумом', s=30)
+		ax1.plot(x_dense, y_sin_true_dense, 'r--', label='Истинная функция', linewidth=3)
+
+		for color in colors:
+			mars_sin = mars_spline(M_max, x, y_sin_noisy)
+			mars_sin.fit(x, y_sin_noisy)
+			y_sin_pred = mars_sin.predict(x_dense)
+			ax1.plot(x_dense, y_sin_pred, color=color, label=f'MARS Sin', linewidth=2)
+
+		ax1.set_title('Аппроксимация синуса', fontsize=14)
+		ax1.set_xlabel('x')
+		ax1.set_ylabel('y')
+		ax1.legend()
+		ax1.grid(True, alpha=0.3)
+
+		# Аппроксимация полинома
+		ax2.scatter(x, y_poly_noisy, alpha=0.6, color='blue', label='Данные с шумом', s=30)
+		ax2.plot(x_dense, y_poly_true_dense, 'r--', label='Истинная функция', linewidth=3)
+
+		for color in colors:
+			mars_poly = mars_spline(M_max, x, y_poly_noisy)
+			mars_poly.fit(x, y_poly_noisy)
+			y_poly_pred = mars_poly.predict(x_dense)
+			ax2.plot(x_dense, y_poly_pred, color=color, label=f'MARS Poly', linewidth=2)
+
+		ax2.set_title('Аппроксимация полинома', fontsize=14)
+		ax2.set_xlabel('x')
+		ax2.set_ylabel('y')
+		ax2.legend()
+		ax2.grid(True, alpha=0.3)
+
+		plt.tight_layout()
+		plt.show()
+
+	@staticmethod
+	def plot(x, y, M_max,
+			 show_data=True, color='blue', title=None,
+			 num_points=300, figsize=(10, 6), grid=True, legend=True,
+			 x_start=None, x_end=None):
+		"""
+		Визуализация MARS-сплайна с параметрами.
+		"""
+		spline = mars_spline(M_max, x, y)
+		spline.fit(x, y)
+
+		x_start = min(x) if x_start is None else x_start
+		x_end = max(x) if x_end is None else x_end
+		x_dense = np.linspace(x_start, x_end, num_points)
+		y_pred = spline.predict(x_dense)
+
+		spline_without_pruning = mars_spline(M_max, x, y, with_pruning=False)
+		spline_without_pruning.fit(x, y)
+		y_pred_2 = spline_without_pruning.predict(x_dense)
+
+		fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+		#plt.figure(figsize=figsize)
+		if show_data:
+			ax1.scatter(x, y, color='red', alpha=0.6, label='Данные', s=20)
+		ax1.plot(x_dense, y_pred, color=color, label=f'MARS M_max={M_max}')
+		ax1.set_xlabel("x")
+		ax1.set_ylabel("y")
+		ax1.set_title(title or f"MARS PRUNED ({len(spline.basis_functions)} basis functions)")
+		
+		if show_data:
+			ax2.scatter(x, y, color='red', alpha=0.6, label='Данные', s=20)
+		ax2.plot(x_dense, y_pred_2, color=color, label=f'MARS M_max={M_max}')
+		ax2.set_xlabel("x")
+		ax2.set_ylabel("y")
+		ax2.set_title(title or f"MARS ({len(spline_without_pruning.basis_functions)} basis functions)")
+
+		if grid:
+			ax1.grid(True)
+			ax2.grid(True)
+		if legend:
+			ax1.legend()
+			ax2.legend()
+
+		plt.tight_layout()
+		plt.show()
+
+# Для отладки
+if __name__ == "__main__":
+	#p_spline.plot_p_spline()
+
+	X = np.array([[-4], [-3], [-2], [-1], [0], [1], [2], [3], [4]])
+	y = np.array([[5], [4], [3], [1.6], [1.3], [1.1],[3.1],[6.1],[8.1]])
+
+	mars_spline.demo(40)
+
+	#mars_spline.plot(X, y, M_max=40, x_start=-5, x_end=5, num_points=10000)
+	pass
 
 # Для отладки
 if __name__ == "__main__":
