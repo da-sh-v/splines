@@ -1716,7 +1716,7 @@ class mars_spline(Spline):
 
 
 	"""Multivariate Adaptive Regression Spline"""
-	def __init__(self, M_max, x, y, with_pruning=True, d=3, lof='rss'):
+	def __init__(self, M_max, x, y, with_pruning=True, d=3, lof='gcv'):
 		"""
 		Инициализация MARS-сплайна
 
@@ -1804,6 +1804,8 @@ class mars_spline(Spline):
 			print(f"added B[{M}] = [-(x{v_star} - {t_star})]_+")
 			self.basis_functions[M-1] = self.basis_functions[m_star] * mars_spline.hinge(v_star, t_star, 1)
 			self.basis_functions[M] = self.basis_functions[m_star] * mars_spline.hinge(v_star, t_star, -1)
+			self.__used_predictors[M-1].add(m_star)
+			self.__used_predictors[M].add(m_star)
 			M += 2
 
 	def backward_pass(self, x, y):
@@ -1958,11 +1960,11 @@ class mars_spline(Spline):
 	def plot(x, y, M_max,
 			 show_data=True, color='blue', title=None,
 			 num_points=300, figsize=(10, 6), grid=True, legend=True,
-			 x_start=None, x_end=None):
+			 x_start=None, x_end=None, lof='rss'):
 		"""
 		Визуализация MARS-сплайна с параметрами.
 		"""
-		spline = mars_spline(M_max, x, y)
+		spline = mars_spline(M_max, x, y, lof=lof)
 		spline.fit(x, y)
 
 		x_start = min(x) if x_start is None else x_start
@@ -1970,7 +1972,7 @@ class mars_spline(Spline):
 		x_dense = np.linspace(x_start, x_end, num_points)
 		y_pred = spline.predict(x_dense)
 
-		spline_without_pruning = mars_spline(M_max, x, y, with_pruning=False)
+		spline_without_pruning = mars_spline(M_max, x, y, with_pruning=False,lof=lof)
 		spline_without_pruning.fit(x, y)
 		y_pred_2 = spline_without_pruning.predict(x_dense)
 
@@ -2009,7 +2011,7 @@ if __name__ == "__main__":
 
 	mars_spline.demo(40)
 
-	#mars_spline.plot(X, y, M_max=40, x_start=-5, x_end=5, num_points=10000)
+	#mars_spline.plot(X, y, M_max=40, x_start=-5, x_end=5, num_points=1000,lof='gcv')
 	pass
 
 # Для отладки
