@@ -7,7 +7,8 @@ from scipy.interpolate import BSpline as SciPyBSpline, CubicSpline as SciPyCubic
 from typing import Callable, List
 from functools import lru_cache
 from scipy.linalg import solve
-
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 (needed for 3-D proj)
+from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error, median_absolute_error
 
 @lru_cache
 def factorial(n):
@@ -1765,7 +1766,7 @@ class mars_spline(Spline):
 	t: Cut point used in basis functions B_M and B_M1
 	m: Index of parent basis function that got multiplied with candidate basis functions
 	"""
-	def candidate_basis_generator(self, M, x):
+	def _candidate_basis_generator(self, M, x):
 		for m in range(0, M-1): #начинаем с 0, а не с 1, как в статье, т.к. индексы начинаются с 0
 			not_used = [i for i in self.__predictor_indices if i not in self.__used_predictors[m]]
 			for v in not_used:
@@ -1789,7 +1790,7 @@ class mars_spline(Spline):
 			
 			#search for the next best basis functions
 			#generator returns new candidate pairs B_M and B_M+1
-			for B_M, B_M1, v, t, m in self.candidate_basis_generator(M, x):
+			for B_M, B_M1, v, t, m in self._candidate_basis_generator(M, x):
 				#add candidate basis functions to the model and copmute lof
 				basis = np.append(self.basis_functions[:M-1], [B_M, B_M1])
 				#compute lack-of-fit of model
@@ -1854,10 +1855,10 @@ class mars_spline(Spline):
 		y_pred = B @ coeff
 		mse = np.mean((y - y_pred) ** 2)
 		N = len(y)
-		C = self.complexity(basis_funcs[1:], x, self.d) #only non-constant basis functions
+		C = self._complexity(basis_funcs[1:], x, self.d) #only non-constant basis functions
 		return mse / ((1 - C/N) ** 2)
 
-	def complexity(self, basis, x, d = 3):
+	def _complexity(self, basis, x, d = 3):
 		#TODO
 		#B_ij = (B_i(x_j)), x_j - j-th observation of predictor set x (j-th row in matrix x)
 		B = np.array([[f(row) for row in x] for f in basis], dtype=float)
@@ -1957,6 +1958,62 @@ class mars_spline(Spline):
 		plt.show()
 
 	@staticmethod
+	def regression_metrics(model, X: np.ndarray, y: np.ndarray, *, sample_weights=None):
+		"""
+		Return a dict with standard regression statistics for a fitted model.
+
+		Parameters
+		----------
+		model : fitted estimator
+			Must expose a `predict(X)` method.
+		X, y : ndarray
+			Feature matrix (N×P) and target vector (N,).
+		sample_weights : array-like, optional
+			If you used weights during fitting, pass the same weights here.
+
+		Returns
+		-------
+		metrics : dict
+			Keys: 'r2', 'adj_r2', 'rmse', 'mae', 'medae'
+		"""
+		y = np.asarray(y).ravel()
+		y_hat = model.predict(X).ravel()
+
+		# Basic sizes
+		n, p = X.shape
+		# R²
+		r2 = r2_score(y, y_hat, sample_weight=sample_weights)
+
+		# Adjusted R²
+		# Guard against n == p + 1 which would divide by zero
+		if n > p + 1:
+			adj_r2 = 1 - (1 - r2) * (n - 1) / (n - p - 1)
+		else:
+			adj_r2 = np.nan  # not defined
+
+		# Other useful errors
+		mse  = mean_squared_error(y, y_hat, sample_weight=sample_weights)
+		rmse = np.sqrt(mse)
+		mae  = mean_absolute_error(y, y_hat, sample_weight=sample_weights)
+		medae = median_absolute_error(y, y_hat)
+
+		return {
+			"r2": r2,
+			"adj_r2": adj_r2,
+			"rmse": rmse,
+			"mae": mae,
+			"medae": medae,
+		}
+
+	@staticmethod
+	# Format string
+	def _format_metrics(m):
+		return (f"$R^2$: {m['r2']:.3f}\n"
+				f"Adj $R^2$: {m['adj_r2']:.3f}\n"
+				f"RMSE: {m['rmse']:.3f}\n"
+				f"MAE: {m['mae']:.3f}")
+
+	@staticmethod
 	def plot(x, y, M_max,
 			 show_data=True, color='blue', title=None,
 			 num_points=300, figsize=(10, 6), grid=True, legend=True,
@@ -1992,6 +2049,17 @@ class mars_spline(Spline):
 		ax2.set_ylabel("y")
 		ax2.set_title(title or f"MARS ({len(spline_without_pruning.basis_functions)} basis functions)")
 
+		metrics_1 = mars_spline.regression_metrics(spline, x, y)
+		metrics_2 = mars_spline.regression_metrics(spline_without_pruning, x, y)
+
+		ax1.text(0.05, 0.2, mars_spline._format_metrics(metrics_1),
+         transform=ax1.transAxes, fontsize=11, verticalalignment='top',
+         bbox=dict(boxstyle="round,pad=0.3", facecolor='white', edgecolor='gray'))
+
+		ax2.text(0.05, 0.2, mars_spline._format_metrics(metrics_2),
+         transform=ax2.transAxes, fontsize=11, verticalalignment='top',
+         bbox=dict(boxstyle="round,pad=0.3", facecolor='white', edgecolor='gray'))
+
 		if grid:
 			ax1.grid(True)
 			ax2.grid(True)
@@ -2002,19 +2070,127 @@ class mars_spline(Spline):
 		plt.tight_layout()
 		plt.show()
 
+	@staticmethod
+	def plot_3d(model, X: np.ndarray, y: np.ndarray,
+		axes: tuple[int, int] = (0, 1), grid: int = 50, fixed: str | float | np.ndarray = "median", elev: int | float = 30,
+		azim: int | float = -60, scatter_kw: dict | None = None, surface_kw: dict | None = None, ax: plt.Axes | None = None,
+		show_metrics: bool = True, metrics_loc: tuple[float, float] = (0.02, 0.02)):
+		"""
+		Draw a 3-D surface of a fitted `mars_spline` model along two predictors.
+
+		Parameters
+		----------
+		model : mars_spline
+			Trained spline model with a `.predict()` method.
+		X, y : ndarray
+			Training data (N×P) and target vector (N,).
+		axes : (int, int), default (0, 1)
+			Column indices in `X` to place on the x- and y-axes.
+		grid : int, default 50
+			Number of points along each axis (surface resolution).
+		fixed : {'median', 'mean'} | float | ndarray, default 'median'
+			How to hold *other* predictors constant when P > 2.
+			* str – 'median' or 'mean' of each remaining column.
+			* float – that constant for **all** remaining columns.
+			* ndarray – shape (P-2,), explicit values.
+		elev, azim : float
+			Initial elevation and azimuth for `ax.view_init`.
+		scatter_kw, surface_kw : dict
+			Extra keyword args forwarded to `ax.scatter` and `ax.plot_surface`.
+		ax : matplotlib Axes3D, optional
+			Reuse an existing 3-D axis; if None, a new figure+axis is created.
+
+		Returns
+		-------
+		ax : matplotlib Axes3D
+			The axis containing the plot (handy for further tweaking).
+		"""
+		# unpack chosen columns
+		ix1, ix2 = axes
+		x1, x2 = X[:, ix1], X[:, ix2]
+
+		# build grid
+		x1_lin = np.linspace(x1.min(), x1.max(), grid)
+		x2_lin = np.linspace(x2.min(), x2.max(), grid)
+		X1g, X2g = np.meshgrid(x1_lin, x2_lin)
+		grid_flat = np.column_stack([X1g.ravel(), X2g.ravel()])
+
+		# handle >2 predictors
+		if X.shape[1] > 2:
+			if isinstance(fixed, str):
+				if fixed == "median":
+					vals = np.median(X[:, [i for i in range(X.shape[1]) if i not in axes]], axis=0)
+				elif fixed == "mean":
+					vals = np.mean(X[:, [i for i in range(X.shape[1]) if i not in axes]], axis=0)
+				else:
+					raise ValueError(f"unknown fixed strategy '{fixed}'")
+			elif np.isscalar(fixed):
+				vals = np.full(X.shape[1] - 2, fixed)
+			else:  # ndarray
+				vals = np.asarray(fixed, dtype=float)
+				if vals.shape != (X.shape[1] - 2,):
+					raise ValueError("fixed ndarray must have shape (P-2,)")
+			grid_flat = np.hstack([grid_flat, np.tile(vals, (grid_flat.shape[0], 1))])
+
+		# predict
+		y_pred = model.predict(grid_flat).reshape(X1g.shape)
+
+		# plotting
+		if ax is None:
+			fig = plt.figure(figsize=(9, 6))
+			ax = fig.add_subplot(111, projection="3d")
+		else:
+			fig = ax.figure
+
+		s_kw = dict(s=20, alpha=0.6, label="observed") | (scatter_kw or {})
+		ax.scatter(x1, x2, y, **s_kw)
+
+		surf_kw_default = dict(rstride=1, cstride=1, linewidth=0,
+								antialiased=True, alpha=0.4, shade=True,
+								label="MARS surface")
+		surf_kw = surf_kw_default | (surface_kw or {})
+		ax.plot_surface(X1g, X2g, y_pred, **surf_kw)
+
+		ax.set_xlabel(f"X{ix1}")
+		ax.set_ylabel(f"X{ix2}")
+		ax.set_zlabel("y")
+		ax.view_init(elev=elev, azim=azim)
+		ax.set_title("MARS spline fit")
+
+		# legend hack: need a proxy artist for the surface
+		if surface_kw is not None or scatter_kw is not None:
+			from matplotlib.lines import Line2D
+			proxy = Line2D([0], [0], linestyle="none", marker="s",
+							markersize=10, markerfacecolor="gray", alpha=0.4)
+			ax.legend([proxy], ["MARS surface"], loc="best")
+
+		if show_metrics:
+			metrics = mars_spline.regression_metrics(model, X, y)
+			text = mars_spline._format_metrics(metrics)
+			fig.text(*metrics_loc, text,
+                transform=fig.transFigure,
+                fontsize=11,
+                verticalalignment='bottom',
+                horizontalalignment='left',
+                bbox=dict(boxstyle="round,pad=0.3", facecolor='white', edgecolor='gray'))
+
+		fig.tight_layout()
+		plt.show()
+
+
 # Для отладки
 if __name__ == "__main__":
 	#p_spline.plot_p_spline()
 
-	X = np.array([[-4], [-3], [-2], [-1], [0], [1], [2], [3], [4]])
-	y = np.array([[5], [4], [3], [1.6], [1.3], [1.1],[3.1],[6.1],[8.1]])
+	X = np.array([[-4, 3], [-3,1], [-2,-1], [-1,5], [0,2], [1,0], [2,1], [3,2], [4,5],[0, 3]])
+	#X = np.array([[-4], [-3], [-2], [-1], [0], [1], [2], [3], [4]])
+	y = np.array([[5], [4], [3], [1.6], [1.3], [1.1],[3.1],[6.1],[8.1],[5]])
 
-	mars_spline.demo(40)
+	#mars_spline.demo(40)
 
-	#mars_spline.plot(X, y, M_max=40, x_start=-5, x_end=5, num_points=1000,lof='gcv')
-	pass
+	mars = mars_spline(M_max=6, x=X, y=y, with_pruning=True, lof='gcv')
+	mars.fit(X, y)
+	mars_spline.plot_3d(mars, X, y, axes=(0, 1), grid=60)
 
-# Для отладки
-if __name__ == "__main__":
-	#p_spline.plot_p_spline()
+	#mars_spline.plot(X, y, M_max=4, x_start=-5, x_end=5, num_points=1000,lof='gcv')
 	pass
