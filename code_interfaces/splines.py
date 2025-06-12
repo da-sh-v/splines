@@ -1681,15 +1681,33 @@ class b_spline(spline):
 class mars_spline(Spline):
 
 	class basis_function:
+		"""
+		Базисная функция для MARS-сплайна.
+		Позволяет использовать базисные функции в виде f(x) = c * (x - t)⁺ или f(x) = c * (t - x)⁺,
+		"""
 		def __init__(self, func):
+			"""
+			Инициализация базисной функции
+			Args:
+				func: Лябда-функция, которая будет использоваться в базисной функции
+			"""
 			self.func = func
 			#self.symbolic = None
 
 		def __call__(self, *args):
+			"""
+			Вызов базисной функции
+			Args:
+				*args: Список предикторов, который будут передан в базисную функцию
+			"""
 			return self.func(*args)
 
-		"""Handles f * g"""
 		def __mul__(self, other):
+			"""
+			Перегрузка оператора умножения для базисных функций.
+			"""
+			# Если другой объект - это базисная функция, то возвращаем новую базисную функцию
+			# Если другой объект - это число, то возвращаем новую базисную функцию с умноженным значением
 			if isinstance(other, mars_spline.basis_function):
 				return mars_spline.basis_function(lambda *args: self(*args) * other(*args))
 			elif isinstance(other, (int, float)):
@@ -1697,11 +1715,18 @@ class mars_spline(Spline):
 			else:
 				return NotImplemented
 
-		"""Handles 2 * f"""
 		def __rmul__(self, other):
+			"""
+			Перегрузка оператора умножения для базисных функций с левой стороны.
+			"""
 			return self.__mul__(other)
 
 		def __add__(self, other):
+			"""
+			Перегрузка оператора сложения для базисных функций.
+			"""
+			# Если другой объект - это базисная функция, то возвращаем новую базисную функцию
+			# Если другой объект - это число, то возвращаем новую базисную функцию с добавленным значением
 			if isinstance(other, mars_spline.basis_function):
 				return mars_spline.basis_function(lambda *args: self(*args) + other(*args))
 			elif isinstance(other, (int, float)):
@@ -1709,6 +1734,9 @@ class mars_spline(Spline):
 			return NotImplemented
 
 		def __radd__(self, other):
+			"""
+			Перегрузка оператора сложения для базисных функций с левой стороны.
+			"""
 			# This lets `sum()` start with 0
 			if isinstance(other, (int, float)):
 				return mars_spline.basis_function(lambda *args: other + self(*args))
@@ -1722,12 +1750,17 @@ class mars_spline(Spline):
 		Инициализация MARS-сплайна
 
 		Args:
-			M_max: Максимальное число базисных функций
-			x: Матрица входных данных
-			y: Вектор зависимых переменных
-			with_pruning: Использовать ли алгоритм backward pass
-			d: Гиперпараметр, цена каждой базисной функции. Используется при расчете GCV.
-			lof: Lack-of-fit. Можно выбрать 'rss' или 'gcv'
+			M_max (int): Максимальное число базисных функций
+			x (array-like): Данные независимых переменных
+			y (array-like): Данные зависимой переменной
+			with_pruning (bool): 
+				Использовать ли обрезку (pruning) модели. Если True, то будет использоваться алгоритм backward pass для удаления избыточных базисных функций.
+			d (int): 
+				Параметр сглаживания d в GCV. Чем больше, тем меньше узлов создаётся.
+			  	Обычно выбирается из диапазона 2 <= d <= 4 (по умолчанию d = 3).
+			lof: 
+				Lack-of-fit (LOF) функция, которая будет использоваться для оценки качества модели.
+				Можно выбрать 'gcv' (Generalized Cross-Validation) или 'rss' (Residual Sum of Squares).
 		"""
 		x = np.asarray(x)
 		if x.ndim == 1:
@@ -1755,18 +1788,15 @@ class mars_spline(Spline):
 		else:
 			raise ValueError(f"Invalid lof value: {lof}. Must be 'gcv' or 'rss'.")
 
-	"""
-	M: Current Basis Function index
-	x: Matrix of observations
-
-	returns: B_M, B_M1, v, t, m
-	B_M: Candidate basis function (with sign: +1)
-	B_M1: Candidate basis function (with sign: -1)
-	v: Index of predictor variable used in basis functions B_M and B_M1
-	t: Cut point used in basis functions B_M and B_M1
-	m: Index of parent basis function that got multiplied with candidate basis functions
-	"""
+	
 	def _candidate_basis_generator(self, M, x):
+		"""
+		Генератор для поиска новых кандидатов на базисные функции B_M и B_M+1.
+		Args:
+			M (int): Текущее количество базисных функций
+			x (array-like): Данные независимых переменных
+			Yields:
+				tuple: Кортеж из базисных функций B_M и B_M+1, индекса предиктора v, точки разреза t и индекса m родительской базисной функции"""
 		for m in range(0, M-1): #начинаем с 0, а не с 1, как в статье, т.к. индексы начинаются с 0
 			not_used = [i for i in self.__predictor_indices if i not in self.__used_predictors[m]]
 			for v in not_used:
@@ -1781,6 +1811,12 @@ class mars_spline(Spline):
 		return
 	
 	def forward_pass(self, x, y):
+		"""
+		Forward pass of the MARS algorithm.
+		Args:
+			x (array-like): Данные независимых переменных
+			y (array-like): Данные зависимой переменной
+		"""
 		M = 2
 		while M <= self.M_max:
 			lof_star = np.inf
@@ -1810,6 +1846,12 @@ class mars_spline(Spline):
 			M += 2
 
 	def backward_pass(self, x, y):
+		"""
+		Backward pass of the MARS algorithm.
+		Args:
+			x (array-like): Данные независимых переменных
+			y (array-like): Данные зависимой переменной
+		"""
 		M_max = len(self.basis_functions) # number of basis functions
 		J_star = set(range(1, M_max + 1)) # {1,2,...,M_max}
 		K_star = J_star.copy()
@@ -1832,25 +1874,51 @@ class mars_spline(Spline):
 					lof_star = lof
 					J_star = K
 				
-		print(f"M_max: {M_max}; J_star: {J_star}; K_star: {K_star}")
+		#print(f"M_max: {M_max}; J_star: {J_star}; K_star: {K_star}")
 		indices = sorted(i - 1 for i in J_star)
 		self.basis_functions = self.basis_functions[indices]
 
 	@staticmethod
 	def least_squares(basis_funcs, x, y):
+		"""
+		Вычисляет коэффициенты базисных функций методом наименьших квадратов.
+		Args:
+			basis_funcs (list): Список базисных функций
+			x (array-like): Данные независимых переменных
+			y (array-like): Данные зависимой переменной
+		Returns:
+			tuple: Кортеж из матрицы базисных функций B и вектора коэффициентов
+		"""
 		B = np.array([[f(row) for f in basis_funcs] for row in x], dtype=float)
 		coefficents, _, _, _ = np.linalg.lstsq(B, y, rcond=None)
 		return (B, coefficents)
 
 	def LOF_RSS(self, basis_funcs, x, y):
+		"""
+		Residual Sum of Squares (RSS) for the given basis functions.
+		Args:
+			basis_funcs (list): Список базисных функций
+			x (array-like): Данные независимых переменных
+			y (array-like): Данные зависимой переменной
+		Returns:
+			float: Значение RSS
+		"""
 		B, coeff = mars_spline.least_squares(basis_funcs, x, y)
 		y_pred = B @ coeff
 		rss = np.sum((y - y_pred) ** 2)
 		return rss
 
 	def LOF_GCV(self, basis_funcs, x, y):
-		#TODO: Generalized Cross Validation
-		## MSE / (1 - Complexity(M)/N)^2
+		"""
+		Generalized Cross-Validation (GCV) for the given basis functions.
+		Args:
+			basis_funcs (list): Список базисных функций
+			x (array-like): Данные независимых переменных
+			y (array-like): Данные зависимой переменной
+		Returns:
+			float: Значение GCV
+		"""
+		# MSE / (1 - Complexity(M)/N)^2
 		B, coeff = mars_spline.least_squares(basis_funcs, x, y)
 		y_pred = B @ coeff
 		mse = np.mean((y - y_pred) ** 2)
@@ -1859,7 +1927,15 @@ class mars_spline(Spline):
 		return mse / ((1 - C/N) ** 2)
 
 	def _complexity(self, basis, x, d = 3):
-		#TODO
+		"""
+		Вычисляет сложность модели, основанную на количестве базисных функций и их проекции.
+		Args:
+			basis (list): Список базисных функций
+			x (array-like): Данные независимых переменных
+			d (int): Параметр сглаживания, по умолчанию 3
+		Returns:
+			float: Значение сложности модели
+		"""
 		#B_ij = (B_i(x_j)), x_j - j-th observation of predictor set x (j-th row in matrix x)
 		B = np.array([[f(row) for row in x] for f in basis], dtype=float)
 		BTB_inv = np.linalg.pinv(B.T @ B)
@@ -1867,7 +1943,12 @@ class mars_spline(Spline):
 		return np.trace(projection) + 1 + d*len(basis)
 
 	def fit(self, x: np.ndarray, y: np.ndarray) -> None:
-		"""Обучение сплайна на данных"""
+		"""
+		Обучение сплайна на данных
+		Args:
+			x (array-like): Данные независимых переменных
+			y (array-like): Данные зависимой переменной
+		"""
 
 		#Add basis functions during forward_pass
 		self.forward_pass(x, y)
@@ -1880,7 +1961,13 @@ class mars_spline(Spline):
 		_, self.coefficients = mars_spline.least_squares(self.basis_functions, x, y)
 
 	def predict(self, x: np.ndarray) -> np.ndarray:
-		"""Предсказание значений сплайна в точках x"""
+		"""
+		Предсказание значений сплайна в точках x
+		Args:
+			x (array-like): Точки, в которых нужно предсказать значения сплайна
+			Returns:
+			np.ndarray: Предсказанные значения сплайна в точках x
+		"""
 		if self.coefficients is None:
 			raise ValueError("Spline not fitted yet")
 
@@ -1892,15 +1979,33 @@ class mars_spline(Spline):
 		return B @ self.coefficients
 
 	def get_basis_functions(self) -> List[Callable]:
-		"""Получение базисных функций сплайна"""
+		"""
+		Получение базисных функций сплайна
+		Returns:
+			List[Callable]: Список базисных функций
+		"""
 		return self.basis_functions
 
 	@staticmethod
 	def hinge(index, knot, sign):
+		"""
+		Создает базисную функцию в виде f(x) = sign * (x[index] - knot)⁺
+		Args:
+			index (int): Индекс предиктора, для которого создается базисная функция
+			knot (float): Точка разреза функции
+			sign (int): Знак функции (1 или -1)
+		Returns:
+			Callable: Базисная функция, которая принимает массив x и возвращает значения функции
+		"""
 		return mars_spline.basis_function(lambda x: max(0, sign * (x[index] - knot)))
 
 	@staticmethod
 	def demo(M_max):
+		"""
+		Демонстрация работы MARS-сплайна на синусоидальных и полиномиальных данных.
+		Args:
+			M_max (int): Максимальное количество базисных функций
+		"""
 		np.random.seed(42)
 		x = np.linspace(0, 2 * np.pi, 250)
 		x = x.reshape(-1,1)
@@ -2008,6 +2113,13 @@ class mars_spline(Spline):
 	@staticmethod
 	# Format string
 	def _format_metrics(m):
+		"""
+		Форматирует метрики регрессии в строку для отображения на графике.
+		Args:
+			m (dict): Словарь с метриками регрессии
+		Returns:
+			str: Форматированная строка с метриками
+		"""
 		return (f"$R^2$: {m['r2']:.3f}\n"
 				f"Adj $R^2$: {m['adj_r2']:.3f}\n"
 				f"RMSE: {m['rmse']:.3f}\n"
@@ -2020,6 +2132,19 @@ class mars_spline(Spline):
 			 x_start=None, x_end=None, lof='rss'):
 		"""
 		Визуализация MARS-сплайна с параметрами.
+		Args:
+			x (array-like): Данные независимых переменных
+			y (array-like): Данные зависимой переменной
+			M_max (int): Максимальное количество базисных функций
+			show_data (bool): Показывать ли исходные данные на графике
+			color (str): Цвет линии сплайна
+			title (str): Заголовок графика
+			num_points (int): Количество точек для предсказания
+			figsize (tuple): Размер фигуры графика
+			grid (bool): Показывать ли сетку на графике
+			legend (bool): Показывать ли легенду на графике
+			x_start, x_end: Начало и конец оси x для предсказания. Если None, то берутся минимальное и максимальное значение x.
+			lof: Lack-of-fit функция ('gcv' или 'rss')
 		"""
 		spline = mars_spline(M_max, x, y, lof=lof)
 		spline.fit(x, y)
@@ -2182,15 +2307,15 @@ class mars_spline(Spline):
 if __name__ == "__main__":
 	#p_spline.plot_p_spline()
 
-	X = np.array([[-4, 3], [-3,1], [-2,-1], [-1,5], [0,2], [1,0], [2,1], [3,2], [4,5],[0, 3]])
-	#X = np.array([[-4], [-3], [-2], [-1], [0], [1], [2], [3], [4]])
-	y = np.array([[5], [4], [3], [1.6], [1.3], [1.1],[3.1],[6.1],[8.1],[5]])
+	#X = np.array([[-4, 3], [-3,1], [-2,-1], [-1,5], [0,2], [1,0], [2,1], [3,2], [4,5],[0, 3]])
+	##X = np.array([[-4], [-3], [-2], [-1], [0], [1], [2], [3], [4]])
+	#y = np.array([[5], [4], [3], [1.6], [1.3], [1.1],[3.1],[6.1],[8.1],[5]])
 
 	#mars_spline.demo(40)
 
-	mars = mars_spline(M_max=6, x=X, y=y, with_pruning=True, lof='gcv')
-	mars.fit(X, y)
-	mars_spline.plot_3d(mars, X, y, axes=(0, 1), grid=60)
+	##mars = mars_spline(M_max=6, x=X, y=y, with_pruning=True, lof='gcv')
+	##mars.fit(X, y)
+	##mars_spline.plot_3d(mars, X, y, axes=(0, 1), grid=60)
 
-	#mars_spline.plot(X, y, M_max=4, x_start=-5, x_end=5, num_points=1000,lof='gcv')
+	##mars_spline.plot(X, y, M_max=4, x_start=-5, x_end=5, num_points=1000,lof='gcv')
 	pass
